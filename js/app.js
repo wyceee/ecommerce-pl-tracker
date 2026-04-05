@@ -17,7 +17,7 @@ const CURRENCIES=[
   {code:'GBP',symbol:'£',name:'British Pound',locale:'en-GB'},
   {code:'CAD',symbol:'CA$',name:'Canadian Dollar',locale:'en-CA'}
 ];
-let S={month:new Date().getMonth(),year:new Date().getFullYear(),view:'dashboard',period:'all',customFrom:'',customTo:'',revenues:{},costs:{},stores:[],currency:'USD',showRevForm:false,showCostForm:false,editRevId:null,editCostId:null};
+let S={month:new Date().getMonth(),year:new Date().getFullYear(),view:'dashboard',period:'all',customFrom:'',customTo:'',revenues:{},costs:{},stores:[],currency:'USD',showRevForm:false,showCostForm:false,editRevId:null,editCostId:null,shopify:{domain:'',clientId:'',clientSecret:'',cachedToken:null,tokenExpiry:null,store:'',syncFrom:'',syncTo:'',lastSync:null}};
 
 function pad(n){return String(n).padStart(2,'0');}
 function dateToISO(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
@@ -39,6 +39,8 @@ function load(){
     if(r)S.revenues=JSON.parse(r);if(c)S.costs=JSON.parse(c);
     S.stores=s?JSON.parse(s):[...DEFAULT_STORES];
     if(cur&&CURRENCIES.some(x=>x.code===cur))S.currency=cur;
+    const sh=localStorage.getItem('ecom-shopify');
+    if(sh){try{const p=JSON.parse(sh);S.shopify={...S.shopify,...p};}catch(e){}}
   }catch(e){S.stores=[...DEFAULT_STORES];}
   S.customFrom=todayISO();S.customTo=todayISO();
 }
@@ -111,7 +113,7 @@ function getDefaultEntryDate(){if(S.period==='today')return todayISO();if(S.peri
 function findRevenueById(id){for(const[key,items]of Object.entries(S.revenues)){const i=(items||[]).findIndex(x=>x.id===id);if(i>=0){const e=items[i];return{key,index:i,entry:{...e,date:e.date||`${key}-${pad(e.day||1)}`}};}}return null;}
 function findCostById(id){for(const[key,items]of Object.entries(S.costs)){const i=(items||[]).findIndex(x=>x.id===id);if(i>=0){const e=items[i];return{key,index:i,entry:{...e,date:e.date||''}};}}return null;}
 
-function openSettings(){document.getElementById('settingsModal').classList.remove('hidden');renderStoreList();renderCurrencyGrid();}
+function openSettings(){document.getElementById('settingsModal').classList.remove('hidden');renderStoreList();renderCurrencyGrid();renderShopifySection();}
 function closeSettings(){document.getElementById('settingsModal').classList.add('hidden');buildFilter();render();}
 function renderCurrencyGrid(){document.getElementById('currencyGrid').innerHTML=CURRENCIES.map(c=>`<div class="currency-opt${c.code===S.currency?' active':''}" onclick="switchCurrency('${c.code}')"><span class="currency-symbol">${c.symbol}</span><span>${c.name}</span></div>`).join('');}
 function switchCurrency(code){S.currency=code;saveCur();renderCurrencyGrid();render();toast('Currency: '+code);}
@@ -278,6 +280,147 @@ function renderCosts(){
   let rows='';if(!csts.length)rows='<p class="empty-text">No costs recorded in this period</p>';
   else{rows=`<div class="table-head"><span style="flex:1">Date</span><span style="flex:1">Category</span><span style="flex:1">Label</span><span style="flex:0.8">Store</span><span style="flex:0.9;text-align:right">Amount</span><span style="flex:0.5;text-align:right">Actions</span></div>`;csts.forEach(c=>{const dl=c.date?friendlyDate(c.date):`${monthLabelFromKey(c.monthKey)} · Monthly`;rows+=`<div class="table-row"><span style="flex:1" class="mono">${esc(dl)}</span><span style="flex:1;display:flex;align-items:center;gap:8px"><span class="cost-dot" style="background:${CAT_COLORS[c.category]}"></span>${esc(c.category)}</span><span style="flex:1" class="text-muted">${esc(c.label||'—')}</span><span style="flex:0.8">${badge(c.store)}${esc(c.store)}</span><span style="flex:0.9;text-align:right" class="mono text-red">−${fmtF(c.amount)}</span><span style="flex:0.5;text-align:right;display:flex;justify-content:flex-end;gap:4px"><button class="icon-btn" onclick="openCostForm('${c.id}')" title="Edit">✎</button><button class="icon-btn delete" onclick="deleteCost('${c.id}')" title="Delete">✕</button></span></div>`;});rows+=`<div class="table-footer"><span style="flex:3.8">Total Costs</span><span style="flex:0.9;text-align:right" class="mono text-red">−${fmtF(tCost)}</span><span style="flex:0.5"></span></div>`;}
   document.getElementById('view-costs').innerHTML=`<div class="section-header animate-in"><span class="section-title">Cost Entries</span><div class="pill-note">Period: ${esc(getRange().label)}</div><button class="add-btn" onclick="openCostForm()">+ Add Cost</button></div>${form}<div class="card animate-in delay-1">${rows}</div>`;
+}
+
+function renderShopifySection(){
+  const el=document.getElementById('shopifySection');if(!el)return;
+  const lastSync=S.shopify.lastSync?new Date(S.shopify.lastSync).toLocaleString('en-GB'):'Never';
+  const today=todayISO();
+  const fromVal=S.shopify.syncFrom||addDaysISO(today,-30);
+  const toVal=S.shopify.syncTo||today;
+  el.innerHTML=`
+    <div class="form-grid" style="margin-bottom:14px">
+      <div style="grid-column:1/-1">
+        <label class="form-label">Store Domain</label>
+        <input type="text" class="form-input" id="shopifyDomain" placeholder="mystore.myshopify.com" value="${esc(S.shopify.domain)}">
+      </div>
+      <div>
+        <label class="form-label">Client ID</label>
+        <input type="text" class="form-input" id="shopifyClientId" placeholder="713903ca0e26234ef..." value="${esc(S.shopify.clientId||'')}">
+      </div>
+      <div>
+        <label class="form-label">Client Secret</label>
+        <input type="password" class="form-input" id="shopifyClientSecret" placeholder="shpcs_..." value="${esc(S.shopify.clientSecret||'')}">
+      </div>
+      <div style="grid-column:1/-1">
+        <label class="form-label">Map orders to store</label>
+        <select class="form-input" id="shopifyStore">
+          <option value="">— No store —</option>
+          ${S.stores.map(s=>`<option value="${esc(s.name)}"${S.shopify.store===s.name?' selected':''}>${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="form-label">Sync From</label>
+        <input type="date" class="form-input" id="shopifySyncFrom" value="${fromVal}">
+      </div>
+      <div>
+        <label class="form-label">Sync To</label>
+        <input type="date" class="form-input" id="shopifySyncTo" value="${toVal}">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <button class="save-btn" style="padding:9px 16px;font-size:12px" onclick="saveShopify()">Save Settings</button>
+      <button id="shopifySyncBtn" class="small-btn" onclick="syncShopify()" style="background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.25);color:var(--blue)">↻ Sync Orders</button>
+      <span style="font-size:11px;color:var(--text-muted)">Last sync: ${lastSync}</span>
+    </div>
+    <div id="shopifyCorsNote" class="hidden" style="background:var(--red-dim);border:1px solid rgba(248,113,113,0.2);border-radius:8px;padding:10px 12px;font-size:11px;color:var(--red);line-height:1.7;margin-bottom:10px">
+      <b>Sync failed.</b> Open this app through the bundled Node server (<code style="background:rgba(0,0,0,0.2);padding:1px 4px;border-radius:3px">npm start</code>), then try again.
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);line-height:1.6">Client ID &amp; Secret come from your Shopify Partners app → Settings → Credentials. A fresh token is fetched automatically before every sync through the built-in backend proxy.</p>`;
+}
+
+function saveShopify(){
+  S.shopify.domain=(document.getElementById('shopifyDomain')?.value||'').trim().replace(/^https?:\/\//,'').replace(/\/$/,'');
+  S.shopify.clientId=(document.getElementById('shopifyClientId')?.value||'').trim();
+  S.shopify.clientSecret=(document.getElementById('shopifyClientSecret')?.value||'').trim();
+  S.shopify.store=document.getElementById('shopifyStore')?.value||'';
+  S.shopify.syncFrom=document.getElementById('shopifySyncFrom')?.value||'';
+  S.shopify.syncTo=document.getElementById('shopifySyncTo')?.value||'';
+  localStorage.setItem('ecom-shopify',JSON.stringify(S.shopify));
+  toast('Shopify settings saved');
+}
+
+async function syncShopify(){
+  const domain=(document.getElementById('shopifyDomain')?.value||S.shopify.domain).trim().replace(/^https?:\/\//,'').replace(/\/$/,'');
+  const storeName=document.getElementById('shopifyStore')?.value??S.shopify.store;
+  const fromDate=document.getElementById('shopifySyncFrom')?.value||addDaysISO(todayISO(),-30);
+  const toDate=document.getElementById('shopifySyncTo')?.value||todayISO();
+  const proxyBase='/proxy?url=';
+  if(!domain){toast('Enter your Shopify domain',true);return;}
+  const clientId=(document.getElementById('shopifyClientId')?.value||S.shopify.clientId||'').trim();
+  const clientSecret=(document.getElementById('shopifyClientSecret')?.value||S.shopify.clientSecret||'').trim();
+  let token='';
+  if(!clientId||!clientSecret){toast('Enter Client ID and Client Secret',true);return;}
+  const btn=document.getElementById('shopifySyncBtn');
+  if(btn){btn.textContent='Syncing…';btn.disabled=true;}
+  document.getElementById('shopifyCorsNote')?.classList.add('hidden');
+  // Auto-fetch token via client credentials if no manual token
+  if(!token&&clientId&&clientSecret){
+    try{
+      if(btn)btn.textContent='Getting token…';
+      const tokenEndpoint=`https://${domain}/admin/oauth/access_token`;
+      const tUrl=`${proxyBase}${encodeURIComponent(tokenEndpoint)}`;
+      const tResp=await fetch(tUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`});
+      if(!tResp.ok){const t=await tResp.text();throw new Error(`Token fetch HTTP ${tResp.status}: ${t.slice(0,150)}`);}
+      const tData=await tResp.json();
+      token=tData.access_token;
+      if(!token)throw new Error('No access_token in response: '+JSON.stringify(tData));
+      S.shopify.cachedToken=token;S.shopify.tokenExpiry=Date.now()+(tData.expires_in-300)*1000;
+      localStorage.setItem('ecom-shopify',JSON.stringify(S.shopify));
+      if(btn)btn.textContent='Syncing…';
+    }catch(err){
+      if(btn){btn.textContent='↻ Sync Orders';btn.disabled=false;}
+      const msg=err.message||'';
+      if(msg.includes('Failed to fetch')||msg.toLowerCase().includes('cors')){toast('Connection error while fetching token',true);document.getElementById('shopifyCorsNote')?.classList.remove('hidden');}
+      else toast('Token error: '+msg.slice(0,80),true);
+      return;
+    }
+  }
+  const baseUrl=`https://${domain}/admin/api/2024-01/orders.json`;
+  let allOrders=[],pageInfo=null,hasMore=true;
+  try{
+    while(hasMore){
+      const params=new URLSearchParams({status:'any',financial_status:'paid',created_at_min:fromDate+'T00:00:00+00:00',created_at_max:toDate+'T23:59:59+00:00',limit:'250',fields:'id,created_at,total_price,order_number'});
+      if(pageInfo)params.set('page_info',pageInfo);
+      const rawUrl=`${baseUrl}?${params}`;
+      const fetchUrl=`${proxyBase}${encodeURIComponent(rawUrl)}`;
+      const resp=await fetch(fetchUrl,{headers:{'X-Shopify-Access-Token':token}});
+      if(!resp.ok){const txt=await resp.text();throw new Error(`HTTP ${resp.status} — ${txt.slice(0,200)}`);}
+      const data=await resp.json();
+      allOrders=allOrders.concat(data.orders||[]);
+      const link=resp.headers.get('Link')||'';
+      if(link.includes('rel="next"')){const m=link.match(/page_info=([^&>]+)[^>]*rel="next"/);pageInfo=m?m[1]:null;hasMore=!!pageInfo;}
+      else{hasMore=false;}
+    }
+    const existingIds=new Set(getAllRevenues().filter(r=>r.shopifyId).map(r=>r.shopifyId));
+    let added=0,skipped=0;
+    allOrders.forEach(order=>{
+      const sid=String(order.id);
+      if(existingIds.has(sid)){skipped++;return;}
+      const amount=parseFloat(order.total_price)||0;
+      if(amount<=0){skipped++;return;}
+      const dateISO=order.created_at.slice(0,10);
+      const tk=monthKeyFromISO(dateISO);
+      if(!S.revenues[tk])S.revenues[tk]=[];
+      S.revenues[tk].push({id:uid(),shopifyId:sid,date:dateISO,day:dayFromISO(dateISO),amount,orders:1,store:storeName,label:`#${order.order_number}`});
+      added++;
+    });
+    S.shopify.lastSync=new Date().toISOString();
+    localStorage.setItem('ecom-shopify',JSON.stringify(S.shopify));
+    if(added>0){saveR();buildFilter();render();}
+    renderShopifySection();
+    toast(`✓ ${added} order${added!==1?'s':''} imported${skipped?', '+skipped+' already existed':''}`);
+  }catch(err){
+    console.error('Shopify sync error:',err);
+    const msg=err.message||'';
+    const isConn=msg.includes('Failed to fetch')||msg.includes('NetworkError')||msg.toLowerCase().includes('cors')||msg.includes('null');
+    if(isConn){
+      toast('Connection error — start the bundled server',true);
+      document.getElementById('shopifyCorsNote')?.classList.remove('hidden');
+    }else{toast('Sync error: '+msg.slice(0,80),true);}
+  }finally{
+    if(btn){btn.textContent='↻ Sync Orders';btn.disabled=false;}
+  }
 }
 
 load();buildFilter();render();

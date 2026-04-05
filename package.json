@@ -1,0 +1,11 @@
+{
+  "name": "ecommerce-pl-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "E-commerce P&L tracker with built-in Shopify proxy backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
+
