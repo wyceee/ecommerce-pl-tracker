@@ -82,7 +82,12 @@
             <span class="io-icon">↑</span>
             <span class="io-btn-label">Import Data<span class="io-btn-sub">Load from JSON</span></span>
           </button>
+          <button class="io-btn" onclick="document.getElementById('cjDropshippingInput').click()">
+            <span class="io-icon">📦</span>
+            <span class="io-btn-label">Import CJDropshipping<span class="io-btn-sub">Orders as COGS</span></span>
+          </button>
           <input type="file" accept=".json" class="import-file-input" id="importInput" onchange="importData(event)">
+          <input type="file" accept=".xls,.xlsx,.csv" class="import-file-input" id="cjDropshippingInput" onchange="importCJDropshipping(event)">
         </div>
       </div>
       <div class="modal-section">
@@ -96,6 +101,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

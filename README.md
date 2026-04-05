@@ -58,3 +58,22 @@ Or double-click `apple/start-app.command` in Finder.
 3. Click Save Settings, then Sync Orders
 
 No separate proxy process is required.
+
+## CJDropshipping order import
+
+Import your CJDropshipping shop orders as COGS costs automatically:
+
+1. Export orders from CJDropshipping as an Excel file (.xls, .xlsx)
+2. Open Settings -> Import & Export
+3. Click "Import CJDropshipping" (📦)
+4. Select your exported Excel file
+5. Orders are imported as COGS cost entries
+
+**Supported columns:**
+- CJ Order Number
+- Order COGS (amount)
+- CJ Paid Time (date)
+
+See `QUICKSTART.md` for quick reference or `CJDROPSHIPPING_IMPORT.md` for detailed documentation.
+
+
