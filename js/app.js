@@ -138,20 +138,6 @@ function closeCostForm(){S.showCostForm=false;S.editCostId=null;render();}
 function saveCost(){const category=document.getElementById('cost-category').value,date=document.getElementById('cost-date').value,amount=parseFloat(document.getElementById('cost-amount').value),label=document.getElementById('cost-label').value,store=document.getElementById('cost-store').value;if(!date){toast('Pick a date',true);return;}if(!amount||amount<=0){toast('Enter a valid amount',true);return;}const tk=monthKeyFromISO(date);if(!S.costs[tk])S.costs[tk]=[];const next={id:S.editCostId||uid(),category,date,day:dayFromISO(date),amount,label,store};if(S.editCostId){const f=findCostById(S.editCostId);if(f){S.costs[f.key].splice(f.index,1);if(!S.costs[f.key].length)delete S.costs[f.key];}}S.costs[tk].push(next);S.month=parseInt(tk.slice(5,7),10)-1;S.year=parseInt(tk.slice(0,4),10);saveC();S.showCostForm=false;S.editCostId=null;toast('Cost saved');render();}
 function deleteCost(id){const f=findCostById(id);if(!f)return;S.costs[f.key].splice(f.index,1);if(!S.costs[f.key].length)delete S.costs[f.key];saveC();toast('Entry deleted');render();}
 
-function buildChartData(revenues){
-  const{start,end}=getRange();const totals=new Map();revenues.forEach(r=>totals.set(r.date,(totals.get(r.date)||0)+r.amount));
-  const diff=daysBetween(start,end);
-  if(S.period==='all'||(S.period==='custom'&&diff>31)){
-    const grouped=new Map();revenues.forEach(r=>{const k=monthKeyFromISO(r.date);grouped.set(k,(grouped.get(k)||0)+r.amount);});
-    const pts=[];let cur=parseISO(`${start.slice(0,7)}-01`);const ec=parseISO(`${end.slice(0,7)}-01`);
-    while(cur<=ec){const iso=`${cur.getFullYear()}-${pad(cur.getMonth()+1)}`;pts.push({key:iso,label:shortMonth(`${iso}-01`)+(cur.getFullYear()!==new Date().getFullYear()?` ${String(cur.getFullYear()).slice(2)}`:''),tooltip:`${monthLabelFromKey(iso)} · ${fmtF(grouped.get(iso)||0)}`,value:grouped.get(iso)||0});cur.setMonth(cur.getMonth()+1);cur.setDate(1);}
-    return pts;
-  }
-  const pts=[];let cur=parseISO(start);const ec=parseISO(end);
-  while(cur<=ec){const iso=dateToISO(cur);let label=String(cur.getDate());if(S.period==='this_week')label=shortWeekday(iso);if(S.period==='yesterday'||S.period==='today')label=S.period==='today'?'Today':'Yday';pts.push({key:iso,label,tooltip:`${friendlyDate(iso)} · ${fmtF(totals.get(iso)||0)}`,value:totals.get(iso)||0});cur.setDate(cur.getDate()+1);}
-  return pts;
-}
-
 function render(){
   const range=getRange();
   document.getElementById('monthLabel').textContent=`${MONTHS[S.month]} ${S.year}`;
@@ -165,16 +151,106 @@ function render(){
   if(S.view==='dashboard')renderDash();if(S.view==='revenue')renderRev();if(S.view==='costs')renderCosts();
 }
 
+function niceYAxis(minV, maxV, targetTicks) {
+  if (minV === maxV) { const s = Math.abs(minV) || 100; return [minV - s, minV, minV + s]; }
+  const range = maxV - minV;
+  const roughStep = range / (targetTicks - 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(Math.abs(roughStep) || 1)));
+  const norm = roughStep / mag;
+  const step = norm <= 1 ? mag : norm <= 2 ? 2 * mag : norm <= 5 ? 5 * mag : 10 * mag;
+  const niceMin = Math.floor(minV / step) * step;
+  const niceMax = Math.ceil(maxV / step) * step;
+  const labels = [];
+  for (let v = niceMin; v <= niceMax + step * 0.001; v += step) labels.push(Math.round(v * 100) / 100);
+  return labels;
+}
+
+function buildChartData(revenues, costs) {
+  const {start, end} = getRange();
+  const diff = daysBetween(start, end);
+  const revTotals = new Map();
+  revenues.forEach(r => revTotals.set(r.date, (revTotals.get(r.date) || 0) + r.amount));
+  const costTotals = new Map();
+  costs.forEach(c => { if (c.date) costTotals.set(c.date, (costTotals.get(c.date) || 0) + c.amount); });
+  const showMonthLabel = diff > 45;
+  const pts = [];
+  let cur = parseISO(start);
+  const ec = parseISO(end);
+  while (cur <= ec) {
+    const iso = dateToISO(cur);
+    const rev = revTotals.get(iso) || 0;
+    const cost = costTotals.get(iso) || 0;
+    const net = rev - cost;
+    let label = '';
+    if (showMonthLabel) {
+      label = (cur.getDate() === 1 || iso === start) ? shortMonth(iso) : '';
+    } else if (S.period === 'this_week') {
+      label = shortWeekday(iso);
+    } else if (S.period === 'today') {
+      label = 'Today';
+    } else if (S.period === 'yesterday') {
+      label = 'Yday';
+    } else {
+      label = String(cur.getDate());
+    }
+    const netColor = net >= 0 ? '#34d399' : '#f87171';
+    const sign = net >= 0 ? '+' : '';
+    pts.push({
+      key: iso, label,
+      tooltip: `${friendlyDate(iso)} &nbsp;&middot;&nbsp; <span style="color:${netColor};font-weight:700">${sign}${fmtF(net)}</span>`,
+      value: net, rev, cost
+    });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return pts;
+}
+
+function renderChart(cd) {
+  if (!cd.length || !cd.some(x => x.rev > 0 || x.cost > 0)) return '<p class="empty-text">No data recorded</p>';
+  const vals = cd.map(x => x.value);
+  const maxV = Math.max(...vals, 0);
+  const minV = Math.min(...vals, 0);
+  const ySteps = niceYAxis(minV, maxV, 5);
+  const niceMin = ySteps[0];
+  const niceMax = ySteps[ySteps.length - 1];
+  const niceRange = niceMax - niceMin || 1;
+  const zeroPct = (niceMax / niceRange) * 100;
+
+  let yAxisHtml = '<div class="chart-y-axis">';
+  ySteps.forEach(v => {
+    const pct = ((niceMax - v) / niceRange) * 100;
+    const col = v > 0 ? '#34d399' : v < 0 ? '#f87171' : '#4a4a58';
+    yAxisHtml += `<span class="y-label" style="top:${pct}%;color:${col}">${fmt(v)}</span>`;
+  });
+  yAxisHtml += '</div>';
+
+  let barsHtml = `<div class="chart-zero-line" style="top:${zeroPct}%"></div>`;
+  cd.forEach(p => {
+    const clamped = Math.max(niceMin, Math.min(niceMax, p.value));
+    const isPos = clamped >= 0;
+    const barTopPct = isPos ? ((niceMax - clamped) / niceRange) * 100 : zeroPct;
+    const barHeightPct = (Math.abs(clamped) / niceRange) * 100;
+    const displayH = (p.rev > 0 || p.cost > 0) ? Math.max(barHeightPct, 0.8) : 0;
+    const cls = isPos ? 'bar-pos' : 'bar-neg';
+    barsHtml += `<div class="bar-col">
+      ${displayH > 0 ? `<div class="bar ${cls}" style="top:${barTopPct}%;height:${displayH}%"><div class="bar-tooltip">${p.tooltip}</div></div>` : ''}
+      <span class="bar-label">${esc(p.label)}</span>
+    </div>`;
+  });
+
+  return `<div class="chart-wrap">${yAxisHtml}<div class="chart-inner"><div class="chart-bars">${barsHtml}</div></div></div>`;
+}
+
 function renderDash(){
   const revs=getFilteredRevenues(),csts=getFilteredCosts();
   const tRev=revs.reduce((s,r)=>s+r.amount,0),tCost=csts.reduce((s,c)=>s+c.amount,0),tOrd=revs.reduce((s,r)=>s+(r.orders||0),0);
   const profit=tRev-tCost,margin=tRev>0?(profit/tRev)*100:0,aov=tOrd>0?tRev/tOrd:0;
-  const cd=buildChartData(revs),maxV=Math.max(...cd.map(x=>x.value),1);
+  const cd=buildChartData(revs,csts);
   const costByCat={};COST_CATEGORIES.forEach(c=>costByCat[c]=0);csts.forEach(c=>costByCat[c.category]=(costByCat[c.category]||0)+c.amount);
   const ac=COST_CATEGORIES.filter(c=>costByCat[c]>0);
-  let bars='';cd.forEach(p=>{const h=p.value>0?Math.max((p.value/maxV)*100,4):0;bars+=`<div class="bar-col"><div class="bar-tooltip">${esc(p.tooltip)}</div><div class="bar" style="height:${h}%"></div><span class="bar-label">${esc(p.label)}</span></div>`;});
   let costH='';if(!ac.length)costH='<p class="empty-text">No costs recorded in this period</p>';
   else ac.forEach(cat=>{const pct=tCost>0?(costByCat[cat]/tCost)*100:0;costH+=`<div class="cost-row"><div class="cost-row-header"><span class="cost-cat-name"><span class="cost-dot" style="background:${CAT_COLORS[cat]}"></span>${cat}</span><span class="cost-cat-amount">${fmt(costByCat[cat])}<span class="cost-cat-pct">${pct.toFixed(0)}%</span></span></div><div class="progress-bg"><div class="progress-fill" style="width:${pct}%;background:${CAT_GRADIENTS[cat]}"></div></div></div>`;});
+  const chartTitle=S.period==='all'?'Net Profit by Day':'Daily Net Profit';
   document.getElementById('view-dashboard').innerHTML=`
     <div class="kpi-grid">
       <div class="kpi green animate-in"><div class="kpi-label">Revenue</div><div class="kpi-value">${fmt(tRev)}</div><div class="kpi-sub">${tOrd} orders</div></div>
@@ -182,7 +258,7 @@ function renderDash(){
       <div class="kpi blue animate-in delay-2"><div class="kpi-label">Net Profit</div><div class="kpi-value">${fmt(profit)}</div><div class="kpi-sub">${margin.toFixed(1)}% margin</div></div>
       <div class="kpi purple animate-in delay-3"><div class="kpi-label">AOV</div><div class="kpi-value">${tOrd>0?fmtF(aov):'—'}</div><div class="kpi-sub">avg order value</div></div>
     </div>
-    <div class="card animate-in delay-2"><div class="card-title">${S.period==='all'?'Revenue by Month':'Revenue Trend'}</div>${cd.length>1||cd.some(x=>x.value>0)?`<div class="chart-container">${bars}</div>`:'<p class="empty-text">No revenue recorded</p>'}</div>
+    <div class="card animate-in delay-2"><div class="card-title">${chartTitle}</div>${renderChart(cd)}</div>
     <div class="card animate-in delay-3"><div class="card-title">Cost Breakdown</div>${costH}</div>`;
 }
 
