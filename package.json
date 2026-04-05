@@ -5,7 +5,9 @@
   "description": "E-commerce P&L tracker with built-in Shopify proxy backend",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:app": "powershell -NoProfile -ExecutionPolicy Bypass -File ./windows/start-app.ps1",
+    "start:app:mac": "bash ./apple/start-app.sh"
   }
 }
 
