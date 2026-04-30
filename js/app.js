@@ -68,7 +68,7 @@ function shortWeekday(iso){return parseISO(iso).toLocaleDateString('en-GB',{week
 function shortMonth(iso){return parseISO(iso).toLocaleDateString('en-GB',{month:'short'});}
 
 function toast(m,err){const t=document.getElementById('toast');t.textContent=m;t.className='toast'+(err?' error':'');t.classList.remove('hidden');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.add('hidden'),2500);}
-function buildFilter(){const sel=document.getElementById('storeFilter'),cv=sel.value;sel.innerHTML='<option value="all">All Stores</option>'+S.stores.map(s=>`<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');if(S.stores.some(s=>s.name===cv))sel.value=cv;else sel.value='all';}
+function buildFilter(){const sel=document.getElementById('storeFilter'),cv=sel.value;sel.innerHTML='<option value="all">All Stores</option>'+S.stores.map(s=>`<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');if(S.stores.some(s=>s.name===cv))sel.value=cv;else if(S.defaultStore&&S.stores.some(s=>s.name===S.defaultStore))sel.value=S.defaultStore;else sel.value='all';}
 function storeOpts(sel=''){return S.stores.map(s=>`<option value="${esc(s.name)}"${s.name===sel?' selected':''}>${esc(s.name)}</option>`).join('');}
 
 function renderPeriodTabs(){
